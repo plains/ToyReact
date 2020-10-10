@@ -2,20 +2,23 @@ const isObject = obj => {
     return obj !== null && typeof obj === "object"
 }
 
+const replaceContent = (node, range) => {
+    range.insertNode(node)
+    range.setStartAfter(node)
+    range.deleteContents()
+
+    range.setStartBefore(node)
+    range.setEndAfter(node)
+}
+
 export class Component {
     constructor(props) {
         this.props = props || Object.create(null)
         this.children = []
         this._root = null
         this._range = null
-        this._oldVdom = null
-    }
-
-    get root(){
-        if (!this._root) {
-            this._root = this.render().root
-        }
-        return this._root
+        this._vdom = null
+        this.vchildren = []
     }
 
     setAttribute(p, value) {
@@ -34,13 +37,11 @@ export class Component {
 
     _renderToDom(range) {
         this._range = range
-        this.render()._renderToDom(range)
+        this._vdom = this.vdom
+        this._vdom._renderToDom(range)
     }
 
     update() {
-        let oldVdom = this._oldVdom
-        let newVdom = this.vdom
-
         let isSameNode = (oldNode, newNode) => {
             if (oldNode.type !== newNode.type) return false
 
@@ -62,22 +63,27 @@ export class Component {
                 newNode._renderToDom(oldNode._range)
                 return
             }
-            let tailChild = oldNode.children[oldNode.children.length - 1]
-            for (let i = 0; i < newNode.children.length; i++) {
-                if (oldNode.children[i]) {
-                    update(oldNode.children[i], newNode.children[i])
+            let tailChild = oldNode.vchildren[oldNode.vchildren.length - 1]
+            for (let i = 0; i < newNode.vchildren.length; i++) {
+                if (oldNode.vchildren[i]) {
+                    update(oldNode.vchildren[i], newNode.vchildren[i])
                 } else {
                     let childRange = document.createRange()
-                    range.setStart(tailChild._range.start, )
+                    let tailChildRange = tailChild._range
+                    childRange.setStart(tailChildRange.startContainer, tailChildRange.endOffset)
+                    childRange.setEnd(tailChildRange.startContainer, tailChildRange.endOffset)
+                    newNode.vchildren[i]._renderToDom(childRange)
+                    tailChild = newNode.vchildren[i]
                 }
             }
         }
-        update(oldVdom, newVdom)
-        // this._renderToDom(this._range)
+
+        let newVdom = this.vdom
+        update(this._vdom, newVdom)
+        this._vdom = newVdom
     }
 
     setState(newState) {
-        this._oldVdom = this.vdom
         if (!isObject(this.state) || this.state === undefined) {
             this.state = newState
             this.update()
@@ -108,31 +114,15 @@ class ElementWrapper extends Component {
         this.type = type
         this._range = null
     }
-    // setAttribute(p, value) {
-    //     if (p.match(/on([\s\S]+)$/)) {
-    //         this.root.addEventListener(RegExp.$1.replace(/^[\s\S]/, c => c.toLowerCase()), value)
-    //     } else if(p.toLowerCase() === "classname") {
-    //         this.root.setAttribute("class", value)
-    //     } else {
-    //         this.root.setAttribute(p, value)
-    //     }
-    // }
-    // appendChild(component) {
-    //     let range = document.createRange()
-    //     range.setStart(this.root, this.root.childNodes.length)
-    //     range.setEnd(this.root, this.root.childNodes.length)
-    //     component._renderToDom(range)
-    // }
-    get vdom() {
-        return this
-    }
 
-    get vchildren() {
-        return this.children.map(child => child.vdom)
+    get vdom() {
+        this.vchildren = this.children.map(child => child.vdom)
+        return this
     }
 
     _renderToDom(range) {
         this._range = range
+        // debugger
         // vdom 转换为 dom to range
         let root = document.createElement(this.type)
 
@@ -147,20 +137,18 @@ class ElementWrapper extends Component {
             }
         }
 
-        for (let child of this.children) {
+        if (!this.vchildren.length) {
+            this.vchildren = this.children.map(child => child.vdom)
+        }
+
+        for (let child of this.vchildren) {
             let childRange = document.createRange()
             childRange.setStart(root, root.childNodes.length)
             childRange.setEnd(root, root.childNodes.length)
             child._renderToDom(childRange)
         }
 
-        range.deleteContents()
-        range.insertNode(root)
-    }
-
-    reRender() {
-        this._range.deleteContents()
-        this._renderToDom(this._range)
+        replaceContent(root, range)
     }
 }
 
@@ -169,6 +157,7 @@ class TextNodeWrapper extends Component {
         super()
         this.type = "#text"
         this.content = text;
+        this._range = null
     }
 
     get vdom() {
@@ -177,8 +166,8 @@ class TextNodeWrapper extends Component {
 
     _renderToDom(range) {
         let root = document.createTextNode(this.content)
-        range.deleteContents()
-        range.insertNode(root)
+        replaceContent(root, range)
+        this._range = range
     }
 }
 
