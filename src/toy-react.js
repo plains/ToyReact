@@ -3,37 +3,84 @@ const isObject = obj => {
 }
 
 export class Component {
-    constructor() {
-        this.props = Object.create(null)
+    constructor(props) {
+        this.props = props || Object.create(null)
         this.children = []
         this._root = null
         this._range = null
+        this._oldVdom = null
     }
+
     get root(){
         if (!this._root) {
             this._root = this.render().root
         }
         return this._root
     }
+
     setAttribute(p, value) {
         this.props[p] = value
     }
+
     appendChild(component) {
         this.children.push(component)
     }
+
+    get vdom() {
+        return this.render().vdom
+    }
+
     render() {}
+
     _renderToDom(range) {
         this._range = range
         this.render()._renderToDom(range)
     }
-    reRender() {
-        this._range.deleteContents()
-        this._renderToDom(this._range)
+
+    update() {
+        let oldVdom = this._oldVdom
+        let newVdom = this.vdom
+
+        let isSameNode = (oldNode, newNode) => {
+            if (oldNode.type !== newNode.type) return false
+
+            for(let p in newNode.props) {
+                if (oldNode.props[p] !== newNode.props[p]) return false
+            }
+
+            if (oldNode.props.length !== newNode.props.length) return false
+
+            if (newNode.type === "#text") {
+                if (newNode.content !== oldNode.content) return false
+            }
+
+            return true
+        }
+
+        let update = (oldNode, newNode) => {
+            if (!isSameNode(oldNode, newNode)) {
+                newNode._renderToDom(oldNode._range)
+                return
+            }
+            let tailChild = oldNode.children[oldNode.children.length - 1]
+            for (let i = 0; i < newNode.children.length; i++) {
+                if (oldNode.children[i]) {
+                    update(oldNode.children[i], newNode.children[i])
+                } else {
+                    let childRange = document.createRange()
+                    range.setStart(tailChild._range.start, )
+                }
+            }
+        }
+        update(oldVdom, newVdom)
+        // this._renderToDom(this._range)
     }
+
     setState(newState) {
+        this._oldVdom = this.vdom
         if (!isObject(this.state) || this.state === undefined) {
             this.state = newState
-            this.reRender()
+            this.update()
             return
         }
         let merge = (oldState, newState) => {
@@ -51,47 +98,87 @@ export class Component {
             }
         }
         merge(this.state, newState)
-        this.reRender()
+        this.update()
     }
 }
 
-class ElementWrapper {
+class ElementWrapper extends Component {
     constructor(type) {
-        this.root = document.createElement(type)
+        super()
+        this.type = type
         this._range = null
     }
-    setAttribute(p, value) {
-        if (p.match(/on([\s\S]+)$/)) {
-            this.root.addEventListener(RegExp.$1.replace(/^[\s\S]/, c => c.toLowerCase()), value)
-        } else if(p.toLowerCase() === "classname") {
-            this.root.setAttribute("class", value)
-        } else {
-            this.root.setAttribute(p, value)
-        }
+    // setAttribute(p, value) {
+    //     if (p.match(/on([\s\S]+)$/)) {
+    //         this.root.addEventListener(RegExp.$1.replace(/^[\s\S]/, c => c.toLowerCase()), value)
+    //     } else if(p.toLowerCase() === "classname") {
+    //         this.root.setAttribute("class", value)
+    //     } else {
+    //         this.root.setAttribute(p, value)
+    //     }
+    // }
+    // appendChild(component) {
+    //     let range = document.createRange()
+    //     range.setStart(this.root, this.root.childNodes.length)
+    //     range.setEnd(this.root, this.root.childNodes.length)
+    //     component._renderToDom(range)
+    // }
+    get vdom() {
+        return this
     }
-    appendChild(component) {
-        let range = document.createRange()
-        range.setStart(this.root, this.root.childNodes.length)
-        range.setEnd(this.root, this.root.childNodes.length)
-        component._renderToDom(range)
+
+    get vchildren() {
+        return this.children.map(child => child.vdom)
     }
+
     _renderToDom(range) {
+        this._range = range
+        // vdom 转换为 dom to range
+        let root = document.createElement(this.type)
+
+        for (let p in this.props) {
+            let value = this.props[p]
+            if (p.match(/on([\s\S]+)$/)) {
+                root.addEventListener(RegExp.$1.replace(/^[\s\S]/, c => c.toLowerCase()), value)
+            } else if(p.toLowerCase() === "classname") {
+                root.setAttribute("class", value)
+            } else {
+                root.setAttribute(p, value)
+            }
+        }
+
+        for (let child of this.children) {
+            let childRange = document.createRange()
+            childRange.setStart(root, root.childNodes.length)
+            childRange.setEnd(root, root.childNodes.length)
+            child._renderToDom(childRange)
+        }
+
         range.deleteContents()
-        range.insertNode(this.root)
+        range.insertNode(root)
     }
+
     reRender() {
         this._range.deleteContents()
         this._renderToDom(this._range)
     }
 }
 
-class TextNodeWrapper {
+class TextNodeWrapper extends Component {
     constructor(text) {
-        this.root = document.createTextNode(text)
+        super()
+        this.type = "#text"
+        this.content = text;
     }
+
+    get vdom() {
+        return this
+    }
+
     _renderToDom(range) {
+        let root = document.createTextNode(this.content)
         range.deleteContents()
-        range.insertNode(this.root)
+        range.insertNode(root)
     }
 }
 
